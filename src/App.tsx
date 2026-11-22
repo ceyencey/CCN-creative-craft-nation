@@ -426,36 +426,87 @@ export default function App() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Scroll reveal animation matching original HTML
+  // Scroll reveal animation matching original HTML (safe across page revisits & tall cards)
   useEffect(() => {
-    const els = document.querySelectorAll(
-      '[data-pg].show .hero>div:first-child>*, [data-pg].show .hero>.ph, [data-pg].show .w>h2, [data-pg].show .w>.sub, [data-pg].show .w>h3, [data-pg].show .card, [data-pg].show .tc'
+    if (page === 'admin') return;
+
+    const els = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[data-pg].show .hero>div:first-child>*, [data-pg].show .hero>.ph, [data-pg].show .w>h2, [data-pg].show .w>.sub, [data-pg].show .w>h3, [data-pg].show .card, [data-pg].show .tc'
+      )
     );
+
+    const timers: number[] = [];
+    const observed: HTMLElement[] = [];
+
+    const reveal = (t: HTMLElement) => {
+      if (t.dataset.s === 'in') {
+        t.classList.remove('rv', 'in');
+        t.style.transitionDelay = '';
+        return;
+      }
+      t.dataset.s = 'in';
+      t.classList.add('rv', 'in');
+      const tid = window.setTimeout(() => {
+        t.classList.remove('rv', 'in');
+        t.style.transitionDelay = '';
+      }, 1400);
+      timers.push(tid);
+    };
+
     const io = new IntersectionObserver(
       (entries) => {
         entries.forEach((e) => {
           const t = e.target as HTMLElement;
-          if (e.intersectionRatio >= 0.12 && t.dataset.s !== 'in') {
-            t.dataset.s = 'in';
-            t.classList.add('rv', 'in');
-            window.setTimeout(() => {
-              t.classList.remove('rv', 'in');
-              t.style.transitionDelay = '';
-            }, 1400);
+          if ((e.isIntersecting || e.intersectionRatio >= 0.02) && t.dataset.s !== 'in') {
+            reveal(t);
+            io.unobserve(t);
           }
         });
       },
-      { threshold: [0, 0.12] }
+      { threshold: 0.01 }
     );
-    els.forEach((el) => {
-      const h = el as HTMLElement;
-      if (h.closest('.modal') || h.closest('#fl') || h.classList.contains('pn')) return;
+
+    const vh = window.innerHeight || 800;
+    els.forEach((h) => {
+      if (
+        h.closest('.modal') ||
+        h.closest('#fl') ||
+        h.closest('[data-pg="admin"]') ||
+        h.classList.contains('pn')
+      ) {
+        return;
+      }
+      if (h.dataset.s === 'in') {
+        h.classList.remove('rv', 'in');
+        h.style.transitionDelay = '';
+        return;
+      }
+      const rect = h.getBoundingClientRect();
+      if (rect.top < vh * 0.96 && rect.bottom > 0) {
+        const idx = h.parentNode ? Array.prototype.indexOf.call(h.parentNode.children, h) : 0;
+        h.style.transitionDelay = `${Math.min(idx, 6) * 80}ms`;
+        h.classList.add('rv');
+        requestAnimationFrame(() => reveal(h));
+        return;
+      }
       const idx = h.parentNode ? Array.prototype.indexOf.call(h.parentNode.children, h) : 0;
       h.style.transitionDelay = `${Math.min(idx, 6) * 80}ms`;
       h.classList.add('rv');
+      observed.push(h);
       io.observe(h);
     });
-    return () => io.disconnect();
+
+    return () => {
+      io.disconnect();
+      timers.forEach((id) => window.clearTimeout(id));
+      observed.forEach((h) => {
+        if (h.dataset.s !== 'in') {
+          h.classList.remove('rv', 'in');
+          h.style.transitionDelay = '';
+        }
+      });
+    };
   }, [page]);
 
   const navigateTo = (target: PageId) => {
